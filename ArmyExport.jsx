@@ -63,7 +63,7 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
   const warnings = [];
 
   if (!catalog) {
-    return { exportObj: { versione: "2.0-IEF", nome: tag, tag: armyCode || "", unita: [], modelli: {} }, warnings: ["⚠ Dati esercito non ancora caricati."] };
+    return { exportObj: { versione: "2.0-IEF", nome: tag, tag: armyCode || "", unita: [], elementi: {} }, warnings: ["⚠ Dati esercito non ancora caricati."] };
   }
 
   // Ricostruisce "unita" dai record armylist — l'array "basi" si ricalcola
@@ -90,7 +90,7 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
     warnings.push(`Unità senza modello 3D assegnato (escluse dal catalogo modelli, ma presenti in "unita"): ${unitaSenzaModello.join(", ")}`);
   }
 
-  const modelli = {};
+  const elementi = {};
   usedElementIds.forEach((elId) => {
     const el = elementiById[elId];
     if (!el) {
@@ -117,7 +117,7 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
 
     // Usa il nickname (leggibile) come chiave nel catalogo modelli finale —
     // è quello che il Lua si aspetta di trovare, non l'id tecnico.
-    modelli[el.nickname] = {
+    elementi[el.nickname] = {
       ...buildMeshNode(el.base, group.base),
       children,
     };
@@ -144,7 +144,7 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
     nome: catalog.name,
     tag: armyCode,
     unita: unitaConNumero,
-    modelli,
+    elementi,
   };
 
   return { exportObj, warnings };
@@ -320,7 +320,7 @@ export default function ArmyExport({ githubConfig, currentTag: currentTagProp, s
           <>
             <div className="bg-[#26211d] border border-[#9C7A3C]/40 px-4 py-3 text-xs font-mono text-[#EDE6D6]/70 space-y-1">
               <div>Unità in armylist: <span className="text-[#9C7A3C] font-bold">{unita.length}</span></div>
-              <div>Nickname unici nel catalogo modelli generato: <span className="text-[#9C7A3C] font-bold">{Object.keys(finalExportObj.modelli).length}</span></div>
+              <div>Nickname unici nel catalogo modelli generato: <span className="text-[#9C7A3C] font-bold">{Object.keys(finalExportObj.elementi).length}</span></div>
               <div>Basi montate (KN+CP+CL): <span className="text-[#EDE6D6]">{orientamentoCalc.basiMontate}</span> · Basi FP: <span className="text-[#EDE6D6]">{orientamentoCalc.basiFP}</span> · Basi FM+FL: <span className="text-[#EDE6D6]">{orientamentoCalc.basiFMFL}</span></div>
             </div>
 

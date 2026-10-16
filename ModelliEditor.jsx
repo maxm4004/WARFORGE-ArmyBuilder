@@ -9,7 +9,7 @@ import { ARMY_CATALOGS, ARMY_CODES } from "./ArmyBuilder.jsx";
    Template.json "slim" per esercito (prossimo editor).
    ============================================================ */
 
-const UNIT_TYPES_LIST = ["KN", "CP", "CL", "FM", "FL", "FP", "ART", "EL"];
+const UNIT_TYPES_LIST = ["KN", "CP", "CL", "FM", "FL", "FP", "ART", "EL", "GEN"];
 
 function genId() {
   // PocketBase richiede id di ESATTAMENTE 15 caratteri (non solo "almeno") —
