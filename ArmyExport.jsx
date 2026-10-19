@@ -57,6 +57,18 @@ async function pbList(collection, armyTag) {
 
 // Fonde armylist + elementi + modelli (tutti letti fresco da PocketBase per
 // l'esercito corrente) in un unico oggetto esportabile.
+// Chiave dell'elemento nel file esercito: nickname + tipo (es.
+// ANG_HUSCARL + CP -> ANG_HUSCARL_CP). Lo stesso nickname può servire
+// tipi diversi (FP e CP), quindi il nickname da solo non è univoco.
+// Se il nickname finisce già con _TIPO il tipo non si ripete — stessa
+// regola di deployment_buildBaseNickname nel Lua.
+function chiaveElemento(el) {
+  const nick = el?.nickname || "";
+  const tipo = el?.tipo || "";
+  if (!tipo || nick.endsWith(`_${tipo}`)) return nick;
+  return `${nick}_${tipo}`;
+}
+
 function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecords) {
   const catalog = ARMY_CATALOGS[tag];
   const armyCode = ARMY_CODES[tag];
@@ -77,7 +89,9 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
     modificatore: r.modificatore || "",
     model: r.model || "",
     basi_per_rango: r.basi_per_rango || 4,
-    basi: buildBasi(r.tipo, r.num_basi || 0, r.basi_per_rango || 4),
+    formazione: r.formazione || "linea",
+    armamento: r.armamento || "normale",
+    basi: buildBasi(r.tipo, r.num_basi || 0, r.basi_per_rango || 4, r.formazione || "linea"),
   }));
 
   const modelliById = Object.fromEntries((modelliRecords || []).map((g) => [g.id, g]));
@@ -91,6 +105,8 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
   }
 
   const elementi = {};
+  const idPerChiave = {};
+  const chiavePerId = {}; // id elemento -> chiave univoca nel blocco "elementi"
   usedElementIds.forEach((elId) => {
     const el = elementiById[elId];
     if (!el) {
@@ -115,19 +131,34 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
       return childNode;
     });
 
-    // Usa il nickname (leggibile) come chiave nel catalogo modelli finale —
-    // è quello che il Lua si aspetta di trovare, non l'id tecnico.
-    elementi[el.nickname] = {
+    // Chiave leggibile nickname + tipo (non l'id tecnico): è quella che
+    // il Lua usa per trovare il modello e costruire la unitKey.
+    // Più elementi possono avere stesso nickname + tipo (es. VIK_BONDI FP
+    // lancieri e VIK_BONDI FP misto, modelli 3D diversi): la chiave del
+    // modello diventa VIK_BONDI_FP~2, ~3... mentre il nome dell'unità
+    // (unit_name) resta VIK_BONDI_FP per tutte.
+    const base = chiaveElemento(el);
+    let chiave = base;
+    for (let n = 2; idPerChiave[chiave] && idPerChiave[chiave] !== el.id; n++) chiave = `${base}~${n}`;
+    idPerChiave[chiave] = el.id;
+    chiavePerId[el.id] = chiave;
+    elementi[chiave] = {
       ...buildMeshNode(el.base, group.base),
       children,
     };
   });
 
-  // "unita" nel file finale referenzia il nickname (non l'id PocketBase) —
-  // più stabile e leggibile per il Lua.
+  // "unita" nel file finale:
+  //   model     = chiave del modello 3D nel blocco "elementi" (univoca)
+  //   unit_name = nome + tipo dell'unità (es. VIK_BONDI_FP), usato dal Lua
+  //               per la unitKey — uguale per unità con modelli 3D diversi
   const unitaConModelNickname = unita.map((u) => {
     const el = u.model ? elementiById[u.model] : null;
-    return { ...u, model: el ? el.nickname : "" };
+    return {
+      ...u,
+      model: el ? (chiavePerId[el.id] || chiaveElemento(el)) : "",
+      unit_name: el ? chiaveElemento(el) : "",
+    };
   });
 
   const tipoCounters = {};

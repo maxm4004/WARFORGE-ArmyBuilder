@@ -182,13 +182,18 @@ function GroupEditor({ groupId, group, onChange, onDelete }) {
   const addSlot = () => onChange({ ...group, slots: [...group.slots, emptySlot()] });
   const removeSlot = (i) => onChange({ ...group, slots: group.slots.filter((_, idx) => idx !== i) });
 
-  // Incolla dal log console TTS: righe tipo [N] 'x' 'y' 'z' — sostituisce
-  // in un colpo solo offsetX/Y/Z di ogni slot corrispondente (material,
-  // type, scale restano manuali).
+  // Incolla dal log console TTS — sostituisce in un colpo solo
+  // offsetX/Y/Z di ogni slot corrispondente (material, type, scale
+  // restano manuali). Formati riconosciuti, righe in qualsiasi ordine:
+  //   [N] 'x' 'y' 'z'
+  //   [N] X x, Y y, Z z
   const applyPastedOffsets = () => {
-    const matches = [...pasteText.matchAll(/\[(\d+)\]\s*'(-?[\d.]+)'\s*'(-?[\d.]+)'\s*'(-?[\d.]+)'/g)];
+    const NUM = "(-?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)";
+    const reApici = new RegExp(`\\[(\\d+)\\]\\s*'${NUM}'\\s*'${NUM}'\\s*'${NUM}'`, "g");
+    const reXYZ = new RegExp(`\\[(\\d+)\\]\\s*X\\s*${NUM}\\s*,?\\s*Y\\s*${NUM}\\s*,?\\s*Z\\s*${NUM}`, "gi");
+    const matches = [...pasteText.matchAll(reApici), ...pasteText.matchAll(reXYZ)];
     if (matches.length === 0) {
-      setPasteStatus("⚠ Nessuna riga riconosciuta nel formato [N] 'x' 'y' 'z'.");
+      setPasteStatus("⚠ Nessuna riga riconosciuta: formato atteso [N] X x, Y y, Z z oppure [N] 'x' 'y' 'z'.");
       return;
     }
     const slots = [...group.slots];
@@ -506,6 +511,7 @@ export default function ModelliEditor({ groups: allGroupsProp, setGroups: setAll
           <div className="flex-1 bg-[#26211d] border border-[#9C7A3C]/40 p-4">
             {selectedGroup ? (
               <GroupEditor
+                key={`${currentArmy}:${selectedId}`}
                 groupId={selectedId}
                 group={selectedGroup}
                 onChange={(g) => updateGroup(selectedId, g)}

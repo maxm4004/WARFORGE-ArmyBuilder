@@ -19,7 +19,10 @@ function findGroupForTipo(groups, tipo) {
 }
 
 function genId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  // PocketBase richiede id di ESATTAMENTE 15 caratteri — l'id viene ora
+  // passato in creazione (upsert), quindi deve essere già valido.
+  const raw = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  return raw.padEnd(15, "0").slice(0, 15);
 }
 
 function emptyMesh() {
@@ -112,6 +115,7 @@ function NicknameEditor({ entry, groups, onChange, onRemove, initiallyOpen }) {
   const groupReady = group && group.base && slotCount > 0;
 
   const setNickname = (nickname) => onChange({ ...entry, nickname });
+  const setArmamento = (armamento) => onChange({ ...entry, armamento });
   const setTipo = (tipo) => {
     const suggested = findGroupForTipo(groups, tipo)?.id || "";
     const newSlotCount = groups?.[suggested]?.slots?.length ?? 0;
@@ -136,7 +140,6 @@ function NicknameEditor({ entry, groups, onChange, onRemove, initiallyOpen }) {
   };
 
   const setBase = (base) => onChange({ ...entry, base });
-  const setRuolo = (ruolo) => onChange({ ...entry, ruolo });
   const setSlot = (i, mesh) => {
     const slots = [...entry.slots];
     slots[i] = mesh;
@@ -176,12 +179,13 @@ function NicknameEditor({ entry, groups, onChange, onRemove, initiallyOpen }) {
           ))}
         </select>
         <select
-          value={entry.ruolo || "normale"}
-          onChange={(e) => setRuolo(e.target.value)}
+          value={entry.armamento || "normale"}
+          onChange={(e) => setArmamento(e.target.value)}
+          title="Armamento del modello 3D: in Army Builder un'unità Mista vede solo i modelli misti"
           className="border border-[#9C7A3C]/60 bg-[#EDE6D6] text-[#2B2622] px-2 py-1 text-sm font-mono"
         >
-          <option value="normale">Normale</option>
-          <option value="generale">Generale</option>
+          <option value="normale">normale</option>
+          <option value="misto">misto</option>
         </select>
         <select
           value={currentGroupId}
@@ -285,7 +289,7 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
       id: newId,
       nickname: `${code}_${n}`,
       tipo: "",
-      ruolo: "normale",
+      armamento: "normale",
       groupId: "",
       base: null,
       slots: [],
@@ -298,7 +302,15 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
     next[i] = entry;
     setEntries(next);
   };
-  const removeEntry = (i) => setEntries(entries.filter((_, idx) => idx !== i));
+  // Rimozione esplicita del singolo elemento: agisce subito anche su
+  // PocketBase (il Salva fa solo upsert e non cancella mai nulla).
+  const removeEntry = (i) => {
+    const e = entries[i];
+    setEntries(entries.filter((_, idx) => idx !== i));
+    if (e?.id) {
+      fetch(`${PB_URL}/api/collections/elementi/records/${e.id}`, { method: "DELETE" }).catch(() => {});
+    }
+  };
 
   const exportObj = {
     versione: "1.0-slim",
@@ -308,7 +320,7 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
       nickname: e.nickname,
       id: e.id,
       tipo: e.tipo,
-      ruolo: e.ruolo || "normale",
+      armamento: e.armamento || "normale",
       groupId: e.groupId || "",
       base: e.base,
       slots: e.slots,
@@ -339,35 +351,47 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
   const saveToGithub = async () => {
     setGithubStatus("Salvataggio su PocketBase in corso...");
     try {
-      // Sync completo e semplice: cancella tutti i record esistenti per
-      // questo esercito, poi ricrea quelli attuali. Evita la complessità
-      // di un upsert con id da tracciare record per record.
+      // Upsert: aggiorna i record esistenti mantenendo il loro id (così
+      // armylist.model resta collegato) e crea solo quelli nuovi. Non
+      // cancella mai nulla — la cancellazione è solo dal bottone "rimuovi".
       const listResp = await fetch(
-        `${PB_URL}/api/collections/elementi/records?filter=${encodeURIComponent(`army_tag="${currentArmy}"`)}&perPage=200`
+        `${PB_URL}/api/collections/elementi/records?filter=${encodeURIComponent(`army_tag="${currentArmy}"`)}&perPage=500`
       );
       if (!listResp.ok) throw new Error(`lista PocketBase fallita (${listResp.status})`);
       const listData = await listResp.json();
-      for (const rec of listData.items) {
-        await fetch(`${PB_URL}/api/collections/elementi/records/${rec.id}`, { method: "DELETE" });
-      }
+      const esistenti = new Set(listData.items.map((r) => r.id));
 
+      let creati = 0, aggiornati = 0;
+      const errori = [];
       for (const e of entries) {
-        await fetch(`${PB_URL}/api/collections/elementi/records`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            nickname: e.nickname,
-            army_tag: currentArmy,
-            tipo: e.tipo,
-            ruolo: e.ruolo || "normale",
-            group_id: e.groupId || "",
-            base: e.base,
-            slots: e.slots,
-            children: e.children,
-          }),
-        });
+        const body = {
+          nickname: e.nickname,
+          army_tag: currentArmy,
+          tipo: e.tipo,
+          armamento: e.armamento || "normale",
+          group_id: e.groupId || "",
+          base: e.base,
+          slots: e.slots,
+          children: e.children,
+        };
+        const esiste = e.id && esistenti.has(e.id);
+        const resp = await fetch(
+          esiste ? `${PB_URL}/api/collections/elementi/records/${e.id}` : `${PB_URL}/api/collections/elementi/records`,
+          {
+            method: esiste ? "PATCH" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(esiste ? body : { id: e.id, ...body }),
+          }
+        );
+        if (!resp.ok) errori.push(`${e.nickname || e.id} (${resp.status})`);
+        else if (esiste) aggiornati++;
+        else creati++;
       }
-      setGithubStatus(`✓ Salvato su PocketBase (${entries.length} elementi).`);
+      setGithubStatus(
+        errori.length
+          ? `⚠ Salvati ${aggiornati + creati}/${entries.length} — errori su: ${errori.join(", ")}`
+          : `✓ Salvato su PocketBase: ${aggiornati} aggiornati, ${creati} nuovi.`
+      );
     } catch (err) {
       setGithubStatus(`⚠ PocketBase non raggiungibile: ${err.message} — è avviato (./pocketbase serve)?`);
     }
@@ -389,7 +413,7 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
         nickname: r.nickname,
         id: r.id,
         tipo: r.tipo,
-        ruolo: r.ruolo || "normale",
+        armamento: r.armamento || "normale",
         groupId: r.group_id || "",
         base: r.base,
         slots: r.slots || [],

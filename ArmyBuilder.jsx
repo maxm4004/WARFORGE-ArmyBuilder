@@ -56,7 +56,7 @@ function applyRemoteGameData({ unitTypes, moraleLevels, weapons, capabilities, a
   mutateInPlace(ARMY_CODES, armyCodes);
 }
 
-export { ARMY_CATALOGS, ARMY_CODES, ARMY_KEYS, initRosterForCatalog, applyRemoteGameData, buildBasi };
+export { ARMY_CATALOGS, ARMY_CODES, ARMY_KEYS, initRosterForCatalog, applyRemoteGameData, buildBasi, FORMAZIONI, ARMAMENTI };
 
 
 
@@ -72,23 +72,59 @@ function formatCapacita(c) {
     .join(" ");
 }
 
-// Coordinate LOGICHE in cm reali riferite all'unità (non coordinate TTS —
-// quelle le calcola il deploy TTS autonomamente). x = posizione laterale nel
-// rango, z = profondità del rango. Vedi prompt_react_positions.md.
-function buildBasi(tipo, numBasi, basiPerRango) {
+// Formazioni allo spawn. "fronte" = basi affiancate nel primo rango,
+// calcolato sulla dimensione dell'unità (basi_per_rango).
+// Armamento dell'unità: "misto" = più tipi di armi nell'unità.
+const ARMAMENTI = [
+  { value: "normale", label: "Normale" },
+  { value: "misto", label: "Misto" },
+];
+
+const FORMAZIONI = [
+  { value: "linea", label: "Linea" },
+  { value: "doppia_linea", label: "Doppia linea" },
+  { value: "colonna", label: "Colonna" },
+];
+
+function frontePerFormazione(basiPerUnita, formazione) {
+  if (formazione === "colonna") return 1;
+  if (formazione === "doppia_linea") return Math.max(1, Math.ceil(basiPerUnita / 2));
+  return basiPerUnita; // linea (default)
+}
+
+// Spazio in cm tra le sotto-unità della stessa riga armylist.
+const MARGINE_UNITA_CM = 4;
+
+// Coordinate LOGICHE in cm reali riferite alla riga armylist (non coordinate
+// TTS — quelle le calcola il deploy TTS autonomamente). x = posizione laterale,
+// z = profondità. Vedi prompt_react_positions.md.
+// basiPerRango = dimensione di UNA unità (il deploy Lua spezza la riga
+// armylist in più unità ogni basiPerRango basi). Lo spazio tra le sotto-unità
+// è già incluso qui: in linea / doppia linea si accodano una dietro l'altra
+// (z), in colonna si affiancano (x). Il deploy Lua non aggiunge altri gap.
+function buildBasi(tipo, numBasi, basiPerRango, formazione = "linea") {
   const def = UNIT_TYPES[tipo];
   const larghezza = 4; // cm, sempre 4 per tutte le basi
   const profondita = def?.base_depth_cm || 0; // GEN ha base_depth_cm:null → 0, innocuo (1 sola base)
-  const perRango = Math.max(1, Number(basiPerRango) || 4);
+  const perUnita = Math.max(1, Number(basiPerRango) || 4);
+  const fronte = frontePerFormazione(perUnita, formazione);
+  const ranghiPerUnita = Math.ceil(perUnita / fronte);
+  const passoX = fronte * larghezza + MARGINE_UNITA_CM;          // colonna: unità affiancate
+  const passoZ = ranghiPerUnita * profondita + MARGINE_UNITA_CM; // linea / doppia linea: unità in fila
+  const affiancate = formazione === "colonna";
   const basi = [];
   for (let i = 0; i < numBasi; i++) {
-    const rango = Math.floor(i / perRango);
-    const posNelRango = i % perRango;
+    const unita = Math.floor(i / perUnita);
+    const k = i % perUnita;
+    const rango = Math.floor(k / fronte);
+    const posNelRango = k % fronte;
+    const offX = affiancate ? unita * passoX : 0;
+    const offZ = affiancate ? 0 : unita * passoZ;
     basi.push({
       id: i + 1,
       seq: i + 1,
       guid: null,
-      posizione: { x: posNelRango * larghezza, y: 0, z: rango * profondita },
+      posizione: { x: offX + posNelRango * larghezza, y: 0, z: offZ + rango * profondita },
     });
   }
   return basi;
@@ -108,7 +144,9 @@ function buildUnitFromTemplate(template, { numBasi, superiore, model, basiPerRan
     modificatore: superiore ? "S" : "",
     model: model || "",
     basi_per_rango: perRango,
-    basi: buildBasi(template.type, finalNumBasi, perRango),
+    formazione: "linea",
+    armamento: "normale",
+    basi: buildBasi(template.type, finalNumBasi, perRango, "linea"),
   };
 }
 
@@ -316,7 +354,13 @@ function AddUnitForm({ catalog, roster, onAdd }) {
   );
 }
 
-function UnitRow({ entry, index, catalog, armyCode, armyTemplates, onRemove, onUpdateBasi, onUpdateBasiPerRango, onUpdateModel }) {
+// Un elemento 3D è proponibile per un'unità se ha lo stesso tipo e lo
+// stesso armamento (normale / misto).
+function modelloCompatibile(t, unit) {
+  return t.tipo === unit.tipo && (t.armamento || "normale") === (unit.armamento || "normale");
+}
+
+function UnitRow({ entry, index, catalog, armyCode, armyTemplates, onRemove, onUpdateBasi, onUpdateBasiPerRango, onUpdateFormazione, onUpdateArmamento, onUpdateModel }) {
   const [open, setOpen] = useState(false);
   const unit = entry.unit;
   const def = UNIT_TYPES[unit.tipo];
@@ -463,7 +507,35 @@ function UnitRow({ entry, index, catalog, armyCode, armyTemplates, onRemove, onU
                 onChange={(e) => onUpdateBasiPerRango(index, e.target.value)}
                 className="border border-[#9C7A3C]/60 bg-white text-[#2B2622] px-2 py-1 text-sm w-20"
               />
-              <span className="text-[10px] text-[#7A2E2E]/70">quante basi affiancate per riga prima di formare un nuovo rango</span>
+              <span className="text-[10px] text-[#7A2E2E]/70">basi per singola unità (la riga viene divisa in unità da questo numero)</span>
+            </div>
+            {!(template?.commander && template.commander !== "No") && (
+              <div className="bg-[#9C7A3C]/15 px-3 py-2 flex items-center gap-2">
+                <span className="font-bold text-[#7A2E2E]">Formazione: </span>
+                <select
+                  value={unit.formazione || "linea"}
+                  onChange={(e) => onUpdateFormazione(index, e.target.value)}
+                  className="border border-[#9C7A3C]/60 bg-white text-[#2B2622] px-2 py-1 text-sm"
+                >
+                  {FORMAZIONI.map((f) => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-[#7A2E2E]/70">disposizione delle basi allo spawn</span>
+              </div>
+            )}
+            <div className="px-3 py-2 flex items-center gap-2">
+              <span className="font-bold text-[#7A2E2E]">Armamento: </span>
+              <select
+                value={unit.armamento || "normale"}
+                onChange={(e) => onUpdateArmamento(index, e.target.value)}
+                className="border border-[#9C7A3C]/60 bg-white text-[#2B2622] px-2 py-1 text-sm"
+              >
+                {ARMAMENTI.map((a) => (
+                  <option key={a.value} value={a.value}>{a.label}</option>
+                ))}
+              </select>
+              <span className="text-[10px] text-[#7A2E2E]/70">misto = più tipi di armi nell'unità</span>
             </div>
             <div className="bg-[#9C7A3C]/15 px-3 py-2 flex items-center gap-2">
               <span className="font-bold text-[#7A2E2E]">Modello 3D: </span>
@@ -474,16 +546,16 @@ function UnitRow({ entry, index, catalog, armyCode, armyTemplates, onRemove, onU
               >
                 <option value="">— nessuno —</option>
                 {(armyTemplates || [])
-                  .filter((t) => t.tipo === unit.tipo && (t.ruolo || "normale") === (template?.commander && template.commander !== "No" ? "generale" : "normale"))
+                  .filter((t) => modelloCompatibile(t, unit))
                   .map((t) => (
-                    <option key={t.id} value={t.id}>{t.nickname}</option>
+                    <option key={t.id} value={t.id}>{t.nickname}{t.armamento === "misto" ? " · misto" : ""}</option>
                   ))}
               </select>
               {(armyTemplates || [])
-                .filter((t) => t.tipo === unit.tipo && (t.ruolo || "normale") === (template?.commander && template.commander !== "No" ? "generale" : "normale"))
+                .filter((t) => modelloCompatibile(t, unit))
                 .length === 0 && (
                 <span className="text-[10px] italic text-[#7A2E2E]/70">
-                  nessun modello {unit.tipo} · {template?.commander && template.commander !== "No" ? "Generale" : "Normale"} in Elementi per questo esercito
+                  nessun modello {unit.tipo}{(unit.armamento || "normale") === "misto" ? " misto" : ""} in Elementi per questo esercito
                 </span>
               )}
             </div>
@@ -537,7 +609,7 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
       .then((r) => (r.ok ? r.json() : { items: [] }))
       .then((data) => {
         setArmyTemplates((data.items || []).map((r) => ({
-          id: r.id, nickname: r.nickname, tipo: r.tipo, ruolo: r.ruolo || "normale",
+          id: r.id, nickname: r.nickname, tipo: r.tipo, armamento: r.armamento || "normale",
         })));
       })
       .catch(() => setArmyTemplates([]));
@@ -574,7 +646,7 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
     const n = Math.max(minFloor, Number(newNumBasi) || 0);
     setRoster(roster.map((entry, idx) => {
       if (idx !== i) return entry;
-      return { ...entry, unit: { ...entry.unit, basi: buildBasi(entry.unit.tipo, n, entry.unit.basi_per_rango) } };
+      return { ...entry, unit: { ...entry.unit, basi: buildBasi(entry.unit.tipo, n, entry.unit.basi_per_rango, entry.unit.formazione) } };
     }));
   };
 
@@ -583,7 +655,27 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
     setRoster(roster.map((entry, idx) => {
       if (idx !== i) return entry;
       const n = entry.unit.basi.length;
-      return { ...entry, unit: { ...entry.unit, basi_per_rango: perRango, basi: buildBasi(entry.unit.tipo, n, perRango) } };
+      return { ...entry, unit: { ...entry.unit, basi_per_rango: perRango, basi: buildBasi(entry.unit.tipo, n, perRango, entry.unit.formazione) } };
+    }));
+  };
+
+  const handleUpdateArmamento = (i, armamento) => {
+    setRoster(roster.map((entry, idx) => {
+      if (idx !== i) return entry;
+      // Se il modello 3D scelto non ha l'armamento nuovo, lo tolgo:
+      // va riscelto tra quelli compatibili.
+      const nextUnit = { ...entry.unit, armamento };
+      const modello = (armyTemplates || []).find((t) => t.id === entry.unit.model);
+      if (modello && !modelloCompatibile(modello, nextUnit)) nextUnit.model = "";
+      return { ...entry, unit: nextUnit };
+    }));
+  };
+
+  const handleUpdateFormazione = (i, formazione) => {
+    setRoster(roster.map((entry, idx) => {
+      if (idx !== i) return entry;
+      const n = entry.unit.basi.length;
+      return { ...entry, unit: { ...entry.unit, formazione, basi: buildBasi(entry.unit.tipo, n, entry.unit.basi_per_rango, formazione) } };
     }));
   };
 
@@ -656,6 +748,8 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
             modificatore: u.modificatore || "",
             model: u.model || "",
             basi_per_rango: u.basi_per_rango || 4,
+            formazione: u.formazione || "linea",
+            armamento: u.armamento || "normale",
             num_basi: u.basi.length,
             order_index: i,
           }),
@@ -687,7 +781,9 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
         modificatore: r.modificatore || "",
         model: r.model || "",
         basi_per_rango: r.basi_per_rango || 4,
-        basi: buildBasi(r.tipo, r.num_basi || 0, r.basi_per_rango || 4),
+        formazione: r.formazione || "linea",
+        armamento: r.armamento || "normale",
+        basi: buildBasi(r.tipo, r.num_basi || 0, r.basi_per_rango || 4, r.formazione || "linea"),
       }));
       githubApplyRosterFromUnita(unitaArray);
       setGithubStatus(`✓ Caricate ${unitaArray.length} unità da PocketBase.`);
@@ -768,7 +864,7 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
                 return rank(aTemplate) - rank(bTemplate);
               })
               .map(({ entry, i }) => (
-                <UnitRow key={i} entry={entry} index={i} catalog={catalog} armyCode={ARMY_CODES[currentTag]} armyTemplates={armyTemplates} onRemove={handleRemove} onUpdateBasi={handleUpdateBasi} onUpdateBasiPerRango={handleUpdateBasiPerRango} onUpdateModel={handleUpdateModel} />
+                <UnitRow key={i} entry={entry} index={i} catalog={catalog} armyCode={ARMY_CODES[currentTag]} armyTemplates={armyTemplates} onRemove={handleRemove} onUpdateBasi={handleUpdateBasi} onUpdateBasiPerRango={handleUpdateBasiPerRango} onUpdateFormazione={handleUpdateFormazione} onUpdateArmamento={handleUpdateArmamento} onUpdateModel={handleUpdateModel} />
               ))
           )}
         </div>
