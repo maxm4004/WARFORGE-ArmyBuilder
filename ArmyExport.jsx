@@ -88,6 +88,7 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
     armi: r.armi || [],
     modificatore: r.modificatore || "",
     model: r.model || "",
+    model_2: (r.armamento || "normale") === "misto" ? (r.model_2 || "") : "",
     basi_per_rango: r.basi_per_rango || 4,
     formazione: r.formazione || "linea",
     armamento: r.armamento || "normale",
@@ -97,7 +98,12 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
   const modelliById = Object.fromEntries((modelliRecords || []).map((g) => [g.id, g]));
   const elementiById = Object.fromEntries((elementiRecords || []).map((e) => [e.id, e]));
 
-  const usedElementIds = new Set(unita.map((u) => u.model).filter(Boolean));
+  const usedElementIds = new Set(unita.flatMap((u) => [u.model, u.model_2]).filter(Boolean));
+
+  const misteSenzaModello2 = unita.filter((u) => u.armamento === "misto" && u.model && !u.model_2).map((u) => u.nome_display);
+  if (misteSenzaModello2.length > 0) {
+    warnings.push(`Unità miste senza modello del 2° rango (useranno il modello del 1° rango per tutte le basi): ${misteSenzaModello2.join(", ")}`);
+  }
 
   const unitaSenzaModello = unita.filter((u) => !u.model).map((u) => u.nome_display);
   if (unitaSenzaModello.length > 0) {
@@ -150,15 +156,20 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
 
   // "unita" nel file finale:
   //   model     = chiave del modello 3D nel blocco "elementi" (univoca)
+  //   model_2   = solo unità miste: modello 3D della seconda metà delle basi
   //   unit_name = nome + tipo dell'unità (es. VIK_BONDI_FP), usato dal Lua
   //               per la unitKey — uguale per unità con modelli 3D diversi
   const unitaConModelNickname = unita.map((u) => {
     const el = u.model ? elementiById[u.model] : null;
-    return {
+    const el2 = u.model_2 ? elementiById[u.model_2] : null;
+    const out = {
       ...u,
       model: el ? (chiavePerId[el.id] || chiaveElemento(el)) : "",
       unit_name: el ? chiaveElemento(el) : "",
     };
+    if (el2) out.model_2 = chiavePerId[el2.id] || chiaveElemento(el2);
+    else delete out.model_2;
+    return out;
   });
 
   const tipoCounters = {};

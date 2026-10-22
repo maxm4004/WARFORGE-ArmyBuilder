@@ -354,13 +354,20 @@ function AddUnitForm({ catalog, roster, onAdd }) {
   );
 }
 
-// Un elemento 3D è proponibile per un'unità se ha lo stesso tipo e lo
-// stesso armamento (normale / misto).
+// Un elemento 3D è proponibile per un'unità se ha lo stesso tipo.
+// Le unità miste usano due modelli normali (1° e 2° rango), quindi
+// l'armamento non filtra più i modelli.
 function modelloCompatibile(t, unit) {
-  return t.tipo === unit.tipo && (t.armamento || "normale") === (unit.armamento || "normale");
+  return t.tipo === unit.tipo;
 }
 
-function UnitRow({ entry, index, catalog, armyCode, armyTemplates, onRemove, onUpdateBasi, onUpdateBasiPerRango, onUpdateFormazione, onUpdateArmamento, onUpdateModel }) {
+// Ordine delle voci nelle combo "Modello 3D": nickname, poi descrizione.
+function ordinaModelli(a, b) {
+  const c = (x, y) => (x || "").localeCompare(y || "", "it", { sensitivity: "base", numeric: true });
+  return c(a.nickname, b.nickname) || c(a.descrizione, b.descrizione);
+}
+
+function UnitRow({ entry, index, catalog, armyCode, armyTemplates, onRemove, onUpdateBasi, onUpdateBasiPerRango, onUpdateFormazione, onUpdateArmamento, onUpdateModel, onUpdateModel2 }) {
   const [open, setOpen] = useState(false);
   const unit = entry.unit;
   const def = UNIT_TYPES[unit.tipo];
@@ -538,7 +545,7 @@ function UnitRow({ entry, index, catalog, armyCode, armyTemplates, onRemove, onU
               <span className="text-[10px] text-[#7A2E2E]/70">misto = più tipi di armi nell'unità</span>
             </div>
             <div className="bg-[#9C7A3C]/15 px-3 py-2 flex items-center gap-2">
-              <span className="font-bold text-[#7A2E2E]">Modello 3D: </span>
+              <span className="font-bold text-[#7A2E2E]">{(unit.armamento || "normale") === "misto" ? "Modello 3D 1° rango: " : "Modello 3D: "}</span>
               <select
                 value={unit.model || ""}
                 onChange={(e) => onUpdateModel(index, e.target.value)}
@@ -547,18 +554,38 @@ function UnitRow({ entry, index, catalog, armyCode, armyTemplates, onRemove, onU
                 <option value="">— nessuno —</option>
                 {(armyTemplates || [])
                   .filter((t) => modelloCompatibile(t, unit))
+                  .sort(ordinaModelli)
                   .map((t) => (
-                    <option key={t.id} value={t.id}>{t.nickname}{t.armamento === "misto" ? " · misto" : ""}</option>
+                    <option key={t.id} value={t.id}>{t.nickname}{t.descrizione ? ` — ${t.descrizione}` : ""}</option>
                   ))}
               </select>
               {(armyTemplates || [])
                 .filter((t) => modelloCompatibile(t, unit))
                 .length === 0 && (
                 <span className="text-[10px] italic text-[#7A2E2E]/70">
-                  nessun modello {unit.tipo}{(unit.armamento || "normale") === "misto" ? " misto" : ""} in Elementi per questo esercito
+                  nessun modello {unit.tipo} in Elementi per questo esercito
                 </span>
               )}
             </div>
+            {(unit.armamento || "normale") === "misto" && (
+              <div className="px-3 py-2 flex items-center gap-2">
+                <span className="font-bold text-[#7A2E2E]">Modello 3D 2° rango: </span>
+                <select
+                  value={unit.model_2 || ""}
+                  onChange={(e) => onUpdateModel2(index, e.target.value)}
+                  className="border border-[#9C7A3C]/60 bg-white text-[#2B2622] px-2 py-1 text-sm"
+                >
+                  <option value="">— nessuno —</option>
+                  {(armyTemplates || [])
+                    .filter((t) => modelloCompatibile(t, unit))
+                    .sort(ordinaModelli)
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>{t.nickname}{t.descrizione ? ` — ${t.descrizione}` : ""}</option>
+                    ))}
+                </select>
+                <span className="text-[10px] text-[#7A2E2E]/70">seconda metà delle basi di ogni unità (es. 5-8 su 8)</span>
+              </div>
+            )}
           </div>
 
           <div className="clear-both"></div>
@@ -609,7 +636,7 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
       .then((r) => (r.ok ? r.json() : { items: [] }))
       .then((data) => {
         setArmyTemplates((data.items || []).map((r) => ({
-          id: r.id, nickname: r.nickname, tipo: r.tipo, armamento: r.armamento || "normale",
+          id: r.id, nickname: r.nickname, tipo: r.tipo, descrizione: r.descrizione || "",
         })));
       })
       .catch(() => setArmyTemplates([]));
@@ -662,11 +689,9 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
   const handleUpdateArmamento = (i, armamento) => {
     setRoster(roster.map((entry, idx) => {
       if (idx !== i) return entry;
-      // Se il modello 3D scelto non ha l'armamento nuovo, lo tolgo:
-      // va riscelto tra quelli compatibili.
+      // Tornando a "normale" il modello del 2° rango non serve più.
       const nextUnit = { ...entry.unit, armamento };
-      const modello = (armyTemplates || []).find((t) => t.id === entry.unit.model);
-      if (modello && !modelloCompatibile(modello, nextUnit)) nextUnit.model = "";
+      if (armamento !== "misto") nextUnit.model_2 = "";
       return { ...entry, unit: nextUnit };
     }));
   };
@@ -683,6 +708,13 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
     setRoster(roster.map((entry, idx) => {
       if (idx !== i) return entry;
       return { ...entry, unit: { ...entry.unit, model } };
+    }));
+  };
+
+  const handleUpdateModel2 = (i, model_2) => {
+    setRoster(roster.map((entry, idx) => {
+      if (idx !== i) return entry;
+      return { ...entry, unit: { ...entry.unit, model_2 } };
     }));
   };
 
@@ -747,6 +779,7 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
             armi: u.armi,
             modificatore: u.modificatore || "",
             model: u.model || "",
+            model_2: (u.armamento || "normale") === "misto" ? (u.model_2 || "") : "",
             basi_per_rango: u.basi_per_rango || 4,
             formazione: u.formazione || "linea",
             armamento: u.armamento || "normale",
@@ -780,6 +813,7 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
         armi: r.armi || [],
         modificatore: r.modificatore || "",
         model: r.model || "",
+        model_2: r.model_2 || "",
         basi_per_rango: r.basi_per_rango || 4,
         formazione: r.formazione || "linea",
         armamento: r.armamento || "normale",
@@ -864,7 +898,7 @@ export default function ArmyBuilder({ githubConfig, rosters: rostersProp, setRos
                 return rank(aTemplate) - rank(bTemplate);
               })
               .map(({ entry, i }) => (
-                <UnitRow key={i} entry={entry} index={i} catalog={catalog} armyCode={ARMY_CODES[currentTag]} armyTemplates={armyTemplates} onRemove={handleRemove} onUpdateBasi={handleUpdateBasi} onUpdateBasiPerRango={handleUpdateBasiPerRango} onUpdateFormazione={handleUpdateFormazione} onUpdateArmamento={handleUpdateArmamento} onUpdateModel={handleUpdateModel} />
+                <UnitRow key={i} entry={entry} index={i} catalog={catalog} armyCode={ARMY_CODES[currentTag]} armyTemplates={armyTemplates} onRemove={handleRemove} onUpdateBasi={handleUpdateBasi} onUpdateBasiPerRango={handleUpdateBasiPerRango} onUpdateFormazione={handleUpdateFormazione} onUpdateArmamento={handleUpdateArmamento} onUpdateModel={handleUpdateModel} onUpdateModel2={handleUpdateModel2} />
               ))
           )}
         </div>

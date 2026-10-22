@@ -13,6 +13,14 @@ import { ARMY_CATALOGS, ARMY_CODES, ARMY_KEYS } from "./ArmyBuilder.jsx";
 
 export { findGroupForTipo, genId };
 
+const confrontaTesto = (a, b) => (a || "").localeCompare(b || "", "it", { sensitivity: "base", numeric: true });
+
+// Ordine elementi: nickname, poi tipo, poi descrizione.
+function ordinaElementi(list) {
+  return [...list].sort((a, b) =>
+    confrontaTesto(a.nickname, b.nickname) || confrontaTesto(a.tipo, b.tipo) || confrontaTesto(a.descrizione, b.descrizione));
+}
+
 function findGroupForTipo(groups, tipo) {
   const entry = Object.entries(groups || {}).find(([, g]) => g.tipi.includes(tipo));
   return entry ? { id: entry[0], group: entry[1] } : null;
@@ -108,14 +116,16 @@ function MeshFields({ label, mesh, onChange }) {
 
 function NicknameEditor({ entry, groups, onChange, onRemove, initiallyOpen }) {
   const [open, setOpen] = useState(!!initiallyOpen);
-  const groupIds = Object.keys(groups || {}).filter((id) => (groups[id].tipi || []).includes(entry.tipo));
+  const groupIds = Object.keys(groups || {})
+    .filter((id) => (groups[id].tipi || []).includes(entry.tipo))
+    .sort((a, b) => confrontaTesto(groups[a].name, groups[b].name));
   const currentGroupId = entry.groupId || findGroupForTipo(groups, entry.tipo)?.id || "";
   const group = groups?.[currentGroupId];
   const slotCount = group?.slots?.length ?? 0;
   const groupReady = group && group.base && slotCount > 0;
 
   const setNickname = (nickname) => onChange({ ...entry, nickname });
-  const setArmamento = (armamento) => onChange({ ...entry, armamento });
+  const setDescrizione = (descrizione) => onChange({ ...entry, descrizione });
   const setTipo = (tipo) => {
     const suggested = findGroupForTipo(groups, tipo)?.id || "";
     const newSlotCount = groups?.[suggested]?.slots?.length ?? 0;
@@ -168,6 +178,13 @@ function NicknameEditor({ entry, groups, onChange, onRemove, initiallyOpen }) {
           placeholder="nickname (es. CP_1_1)"
           className="font-mono text-sm font-bold border border-[#9C7A3C]/60 bg-[#EDE6D6] text-[#2B2622] px-2 py-1 w-40"
         />
+        <input
+          value={entry.descrizione || ""}
+          onChange={(e) => setDescrizione(e.target.value)}
+          placeholder="descrizione (es. lancieri)"
+          title="Solo per riconoscere il modello nella combo di Army Builder — non cambia nickname né unitKey"
+          className="text-sm border border-[#9C7A3C]/60 bg-[#EDE6D6] text-[#2B2622] px-2 py-1 w-44"
+        />
         <select
           value={entry.tipo}
           onChange={(e) => setTipo(e.target.value)}
@@ -177,15 +194,6 @@ function NicknameEditor({ entry, groups, onChange, onRemove, initiallyOpen }) {
           {UNIT_TYPES_LIST.map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
-        </select>
-        <select
-          value={entry.armamento || "normale"}
-          onChange={(e) => setArmamento(e.target.value)}
-          title="Armamento del modello 3D: in Army Builder un'unità Mista vede solo i modelli misti"
-          className="border border-[#9C7A3C]/60 bg-[#EDE6D6] text-[#2B2622] px-2 py-1 text-sm font-mono"
-        >
-          <option value="normale">normale</option>
-          <option value="misto">misto</option>
         </select>
         <select
           value={currentGroupId}
@@ -289,7 +297,7 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
       id: newId,
       nickname: `${code}_${n}`,
       tipo: "",
-      armamento: "normale",
+      descrizione: "",
       groupId: "",
       base: null,
       slots: [],
@@ -320,7 +328,7 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
       nickname: e.nickname,
       id: e.id,
       tipo: e.tipo,
-      armamento: e.armamento || "normale",
+      descrizione: e.descrizione || "",
       groupId: e.groupId || "",
       base: e.base,
       slots: e.slots,
@@ -368,7 +376,7 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
           nickname: e.nickname,
           army_tag: currentArmy,
           tipo: e.tipo,
-          armamento: e.armamento || "normale",
+          descrizione: e.descrizione || "",
           group_id: e.groupId || "",
           base: e.base,
           slots: e.slots,
@@ -413,13 +421,15 @@ export default function ElementiEditor({ githubConfig, templates: templatesProp,
         nickname: r.nickname,
         id: r.id,
         tipo: r.tipo,
-        armamento: r.armamento || "normale",
+        descrizione: r.descrizione || "",
         groupId: r.group_id || "",
         base: r.base,
         slots: r.slots || [],
         children: r.children || [],
       }));
-      setEntries(loadedEntries);
+      // Ordinati al caricamento (non mentre si scrive, per non far
+      // saltare le righe durante la modifica del nickname).
+      setEntries(ordinaElementi(loadedEntries));
       setGithubStatus(`✓ Caricati ${loadedEntries.length} elementi da PocketBase.`);
     } catch (err) {
       setGithubStatus(`⚠ PocketBase non raggiungibile: ${err.message} — è avviato (./pocketbase serve)?`);

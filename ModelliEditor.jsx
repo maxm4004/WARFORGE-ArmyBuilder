@@ -336,7 +336,7 @@ export default function ModelliEditor({ groups: allGroupsProp, setGroups: setAll
 
   const updateGroup = (id, newGroup) => setGroups((g) => ({ ...g, [id]: newGroup }));
 
-  const PB_URL = "http://127.0.0.1:8090";
+const PB_URL = "http://127.0.0.1:8090";
 
   const deleteGroup = (id) => {
     setGroups((g) => {
@@ -445,7 +445,9 @@ export default function ModelliEditor({ groups: allGroupsProp, setGroups: setAll
         loadedGroups[r.id] = { name: r.name || r.id, note: r.note || "", tipi: r.tipi || [], base: r.base, slots: r.slots || [] };
       });
       setGroups(loadedGroups);
-      setSelectedId(Object.keys(loadedGroups)[0] || "");
+      const primo = Object.entries(loadedGroups)
+        .sort(([, a], [, b]) => (a.name || "").localeCompare(b.name || "", "it", { sensitivity: "base", numeric: true }))[0];
+      setSelectedId(primo ? primo[0] : "");
       setGithubStatus(`✓ Caricati ${data.items.length} gruppi da PocketBase.`);
     } catch (err) {
       setGithubStatus(`⚠ PocketBase non raggiungibile: ${err.message} — è avviato (./pocketbase serve)?`);
@@ -482,7 +484,9 @@ export default function ModelliEditor({ groups: allGroupsProp, setGroups: setAll
 
         <div className="flex gap-5">
           <div className="w-56 shrink-0 space-y-1">
-            {Object.entries(groups).map(([id, g]) => (
+            {Object.entries(groups)
+              .sort(([, a], [, b]) => (a.name || "").localeCompare(b.name || "", "it", { sensitivity: "base", numeric: true }))
+              .map(([id, g]) => (
               <button
                 key={id}
                 onClick={() => setSelectedId(id)}
