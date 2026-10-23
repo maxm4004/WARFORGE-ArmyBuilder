@@ -81,11 +81,35 @@ function mergeFromPocketBase(tag, armylistRecords, elementiRecords, modelliRecor
   // Ricostruisce "unita" dai record armylist — l'array "basi" si ricalcola
   // da num_basi + basi_per_rango, non viene mai salvato direttamente.
   const unitaOrdinate = [...armylistRecords].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+
+  // Capacità (SPADA, IMPETO, MURO_DI_SCUDI, RAFFICA...): non sono salvate
+  // nei record armylist, si prendono dal catalogo dell'esercito (stessa
+  // unità: nome + tipo). Servono al Lua (mischia, carica, Tiro d'Arresto).
+  const templates = catalog.units || [];
+  const capacitaDi = (r) => {
+    const t = templates.find((u) => u.name === r.nome_display && u.type === r.tipo)
+           || templates.find((u) => u.name === r.nome_display);
+    return t ? [...(t.capabilities || [])] : null;
+  };
+  // UNITA' CHIAVE (caselle scure nelle liste): nel catalogo is_key_unit.
+  // Serve al Lua per il Breakpoint (unità chiave in rotta/distrutta = 2 punti).
+  const chiaveDi = (r) => {
+    const t = templates.find((u) => u.name === r.nome_display && u.type === r.tipo)
+           || templates.find((u) => u.name === r.nome_display);
+    return !!(t && t.is_key_unit);
+  };
+  const senzaCatalogo = unitaOrdinate.filter((r) => capacitaDi(r) === null).map((r) => r.nome_display);
+  if (senzaCatalogo.length > 0) {
+    warnings.push(`Unità non trovate nel catalogo (capacità non esportate): ${senzaCatalogo.join(", ")}`);
+  }
+
   const unita = unitaOrdinate.map((r) => ({
     nome_display: r.nome_display,
     tipo: r.tipo,
     morale: r.morale,
     armi: r.armi || [],
+    capabilities: capacitaDi(r) || [],
+    chiave: chiaveDi(r),
     modificatore: r.modificatore || "",
     model: r.model || "",
     model_2: (r.armamento || "normale") === "misto" ? (r.model_2 || "") : "",
